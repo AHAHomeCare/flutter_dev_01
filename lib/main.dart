@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/home_screen.dart';
+import 'screens/app_shell.dart';
 
 void main() => runApp(const SonaTasksApp());
 
@@ -21,7 +21,7 @@ class SonaTasksApp extends StatelessWidget {
         ),
         cardTheme: const CardThemeData(color: Colors.white, elevation: 0),
       ),
-      home: const HomeScreen(),
+      home: const AppShell(),
     );
   }
 }

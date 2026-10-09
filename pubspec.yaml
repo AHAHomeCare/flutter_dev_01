@@ -1,5 +1,5 @@
-name: app_01
-description: "SonaTasks - Bai 02 thuc hanh layout Flutter."
+name: sonatasks_bai03
+description: "SonaTasks Bai 03 ke thua Bai 02: Home Task About va bieu mau."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
   flutter_test:
     sdk: flutter
 
@@ -56,6 +58,8 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/images/sonadezi_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
