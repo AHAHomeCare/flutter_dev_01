@@ -14,7 +14,7 @@ flutter doctor
 flutter pub get
 flutter devices
 ```
-
+## Commit test git 03
 3. Khởi động Android Emulator hoặc kết nối điện thoại đã bật USB debugging.
 4. Chạy ứng dụng bằng ID thiết bị lấy từ `flutter devices`:
 
