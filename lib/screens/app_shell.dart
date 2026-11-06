@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../services/sona_task_api.dart';
 import 'about_screen.dart';
 import 'home_screen.dart';
 import 'task_screen.dart';
 
 // Chỉ khung chung có Scaffold, AppBar và BottomNavigationBar.
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({super.key, this.api});
+  final SonaTaskApi? api;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -14,7 +16,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int currentIndex = 0;
-  int _pendingCount = createSampleTasks().where((t) => !t.isDone).length;
+  int _pendingCount = 0;
 
   void _selectScreen(int index) {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -62,7 +64,7 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final screens = <Widget>[
       const HomeScreen(),
-      TaskScreen(onPendingChanged: _updatePendingCount),
+      TaskScreen(api: widget.api, onPendingChanged: _updatePendingCount),
       const AboutScreen(),
     ];
     return Scaffold(

@@ -1,7 +1,12 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:sonatasks_bai09/services/sona_task_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sonatasks_bai03/main.dart';
-import 'package:sonatasks_bai03/screens/task_screen.dart';
+import 'package:sonatasks_bai09/main.dart';
+import 'package:sonatasks_bai09/screens/task_screen.dart';
 
 Future<void> selectTab(WidgetTester tester, String name) async {
   await tester.tap(
@@ -47,9 +52,42 @@ int pending(WidgetTester tester) {
   return int.parse((badge.label! as Text).data!);
 }
 
+SonaTasksApp testApp() {
+  final tasks = List.generate(
+    5,
+    (index) => {
+      'id': index + 1,
+      'name': index == 1
+          ? 'Dựng layout màn hình Home'
+          : 'Công việc ${index + 1}',
+      'description': null,
+    },
+  );
+  final client = MockClient((request) async {
+    if (request.method == 'GET' && request.url.path == '/SonaTask/GetAll') {
+      return http.Response.bytes(
+        utf8.encode(jsonEncode({'status': 200, 'data': tasks})),
+        200,
+      );
+    }
+    expect(request.method, 'POST');
+    expect(request.url.path, '/SonaTask/Create');
+    final body =
+        jsonDecode(utf8.decode(request.bodyBytes)) as Map<String, dynamic>;
+    final task = <String, dynamic>{'id': tasks.length + 1, ...body};
+    tasks.add(task);
+    return http.Response.bytes(
+      utf8.encode(jsonEncode({'status': 200, 'data': task})),
+      200,
+    );
+  });
+  addTearDown(client.close);
+  return SonaTasksApp(api: SonaTaskApi(client, 'http://localhost:5279'));
+}
+
 void main() {
   testWidgets('Home có logo, lời chào và một khung cố định', (tester) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('schoolLogo')), findsOneWidget);
     expect(
@@ -63,11 +101,11 @@ void main() {
     expect(find.byType(BottomNavigationBar), findsOneWidget);
     expect(find.byTooltip('Thông báo'), findsOneWidget);
     expect(find.byTooltip('Tài khoản'), findsOneWidget);
-    expect(pending(tester), 3);
+    expect(pending(tester), 5);
   });
 
   testWidgets('Menu chọn đúng ba Screen và About đủ nội dung', (tester) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     for (final entry in ['Task', 'About', 'Home'].asMap().entries) {
       await selectTab(tester, entry.value);
       final expected = {'Home': 0, 'Task': 1, 'About': 2}[entry.value];
@@ -86,21 +124,21 @@ void main() {
   });
 
   testWidgets('Form Task chặn rỗng và khoảng trắng', (tester) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await selectTab(tester, 'Task');
     for (final title in ['', '   ']) {
       await save(tester, title);
       expect(find.text('Vui lòng nhập tên công việc.'), findsOneWidget);
-      expect(pending(tester), 3);
+      expect(pending(tester), 5);
     }
-    await showItem(tester, find.text('5 công việc • 2 đã hoàn thành'));
-    expect(find.text('5 công việc • 2 đã hoàn thành'), findsOneWidget);
+    await showItem(tester, find.text('5 công việc • 0 đã hoàn thành'));
+    expect(find.text('5 công việc • 0 đã hoàn thành'), findsOneWidget);
   });
 
   testWidgets('Thêm hai Task, xóa form và giữ dữ liệu khi đổi tab', (
     tester,
   ) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await selectTab(tester, 'Task');
     await save(tester, '  Ôn tập Flutter  ', description: '  Làm bài 03  ');
     for (final key in ['taskTitle', 'taskDescription']) {
@@ -110,12 +148,12 @@ void main() {
       );
     }
     await save(tester, 'Nộp bài thực hành');
-    expect(pending(tester), 5);
+    expect(pending(tester), 7);
     await selectTab(tester, 'Home');
     await selectTab(tester, 'About');
     await selectTab(tester, 'Task');
-    await showItem(tester, find.text('7 công việc • 2 đã hoàn thành'));
-    expect(find.text('7 công việc • 2 đã hoàn thành'), findsOneWidget);
+    await showItem(tester, find.text('7 công việc • 0 đã hoàn thành'));
+    expect(find.text('7 công việc • 0 đã hoàn thành'), findsOneWidget);
     await showItem(tester, find.text('Ôn tập Flutter'));
     expect(find.text('Làm bài 03'), findsOneWidget);
     await showItem(tester, find.text('Nộp bài thực hành'));
@@ -123,7 +161,7 @@ void main() {
   });
 
   testWidgets('Ưu tiên được lưu riêng và form được đặt lại', (tester) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await selectTab(tester, 'Task');
     await tester.tap(find.byType(DropdownButton<String>));
     await tester.pumpAndSettle();
@@ -141,7 +179,7 @@ void main() {
   });
 
   testWidgets('Checkbox đồng bộ thống kê, badge và bộ lọc', (tester) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await selectTab(tester, 'Task');
     final title = find.text('Dựng layout màn hình Home');
     await showItem(tester, title);
@@ -150,12 +188,12 @@ void main() {
       find.descendant(of: card, matching: find.byType(Checkbox)),
     );
     await tester.pumpAndSettle();
-    expect(pending(tester), 2);
+    expect(pending(tester), 4);
     expect(
       tester.widget<Text>(title).style!.decoration,
       TextDecoration.lineThrough,
     );
-    await showItem(tester, find.text('5 công việc • 3 đã hoàn thành'));
+    await showItem(tester, find.text('5 công việc • 1 đã hoàn thành'));
     await showItem(tester, find.byType(SwitchListTile));
     await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
@@ -167,14 +205,14 @@ void main() {
       find.descendant(of: card, matching: find.byType(Checkbox)),
     );
     await tester.pumpAndSettle();
-    expect(pending(tester), 3);
+    expect(pending(tester), 5);
   });
 
   testWidgets('Chuông thông báo và Dialog tài khoản hoạt động', (tester) async {
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await tester.tap(find.byTooltip('Thông báo'));
     await tester.pumpAndSettle();
-    expect(find.text('Bạn có 3 công việc chưa hoàn thành.'), findsOneWidget);
+    expect(find.text('Bạn có 5 công việc chưa hoàn thành.'), findsOneWidget);
     await tester.tap(find.byTooltip('Tài khoản'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
@@ -187,22 +225,16 @@ void main() {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(const SonaTasksApp());
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await selectTab(tester, 'Task');
     tester.view.viewInsets = const FakeViewPadding(bottom: 280);
     await tester.pumpAndSettle();
     await save(tester, 'Việc trên mobile');
-    expect(pending(tester), 4);
+    expect(pending(tester), 6);
     expect(tester.takeException(), isNull);
     expect(find.byType(AppBar), findsOneWidget);
     expect(find.byType(BottomNavigationBar), findsOneWidget);
-  });
-
-  test('Danh sách mẫu không chia sẻ đối tượng mutable', () {
-    final first = createSampleTasks();
-    first[0].isDone = false;
-    expect(createSampleTasks()[0].isDone, isTrue);
   });
 }

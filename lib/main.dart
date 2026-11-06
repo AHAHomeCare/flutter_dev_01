@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'screens/app_shell.dart';
+import 'services/sona_task_api.dart';
 
 void main() => runApp(const SonaTasksApp());
 
 class SonaTasksApp extends StatelessWidget {
-  const SonaTasksApp({super.key});
+  const SonaTasksApp({super.key, this.api});
+  final SonaTaskApi? api;
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -21,7 +23,7 @@ class SonaTasksApp extends StatelessWidget {
         ),
         cardTheme: const CardThemeData(color: Colors.white, elevation: 0),
       ),
-      home: const AppShell(),
+      home: AppShell(api: api),
     );
   }
 }

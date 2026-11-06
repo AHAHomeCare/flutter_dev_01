@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 class AddTaskForm extends StatefulWidget {
   const AddTaskForm({super.key, required this.onAdd});
   // Callback chuyển dữ liệu từ form tới màn hình cha.
-  final void Function(String title, String description, String priority) onAdd;
+  final Future<void> Function(String title, String description, String priority)
+  onAdd;
   @override
   State<AddTaskForm> createState() => _AddTaskFormState();
 }
@@ -13,7 +14,9 @@ class _AddTaskFormState extends State<AddTaskForm> {
   final _descriptionController = TextEditingController();
   String _priority = 'Bình thường';
 
-  void _saveTask() {
+  bool _saving = false;
+
+  Future<void> _saveTask() async {
     final title = _titleController.text.trim();
     final description = _descriptionController.text.trim();
     if (title.isEmpty) {
@@ -23,8 +26,24 @@ class _AddTaskFormState extends State<AddTaskForm> {
       );
       return;
     }
-    widget.onAdd(title, description, _priority);
+    setState(() => _saving = true);
+    try {
+      await widget.onAdd(title, description, _priority);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Không xác nhận được việc lưu. Hãy tải lại danh sách trước khi thử lại.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
     setState(() {
+      _saving = false;
       _priority = 'Bình thường';
     });
     _titleController.clear();
@@ -49,7 +68,9 @@ class _AddTaskFormState extends State<AddTaskForm> {
       children: [
         TextField(
           key: const Key('taskTitle'),
+          enabled: !_saving,
           controller: _titleController,
+          maxLength: 100,
           textInputAction: TextInputAction.next,
           decoration: const InputDecoration(
             labelText: 'Tên công việc',
@@ -60,7 +81,9 @@ class _AddTaskFormState extends State<AddTaskForm> {
         const SizedBox(height: 12),
         TextField(
           key: const Key('taskDescription'),
+          enabled: !_saving,
           controller: _descriptionController,
+          maxLength: 500,
           minLines: 2,
           maxLines: 4,
           decoration: const InputDecoration(
@@ -83,21 +106,23 @@ class _AddTaskFormState extends State<AddTaskForm> {
                     child: Text(priority),
                   );
                 }).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _priority = value;
-                    });
-                  }
-                },
+                onChanged: _saving
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() {
+                            _priority = value;
+                          });
+                        }
+                      },
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
         ElevatedButton(
-          onPressed: _saveTask,
-          child: const Text('Lưu công việc'),
+          onPressed: _saving ? null : _saveTask,
+          child: Text(_saving ? 'Đang lưu...' : 'Lưu công việc'),
         ),
       ],
     );

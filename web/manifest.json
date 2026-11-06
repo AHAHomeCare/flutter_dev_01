@@ -1,6 +1,6 @@
 {
-    "name": "app_01",
-    "short_name": "app_01",
+    "name": "sonatasks_bai09",
+    "short_name": "sonatasks_bai09",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

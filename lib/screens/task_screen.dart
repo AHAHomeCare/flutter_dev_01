@@ -1,69 +1,127 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../services/sona_task_api.dart';
 
 import '../widgets/add_task_form.dart';
 
-// Kế thừa dữ liệu Bài 02; isDone có thể thay đổi ở Bài 03.
-class Task {
-  Task(
-    this.title,
-    this.description, {
-    this.isDone = false,
-    this.priority = 'Bình thường',
-  });
-  final String title;
-  final String description;
-  bool isDone;
-  final String priority;
-}
-
-// Hàm tạo danh sách mới cho mỗi màn hình, tránh dùng chung Task có thể sửa.
-List<Task> createSampleTasks() => <Task>[
-  Task('Ôn tập Dart cơ bản', 'Biến, kiểu dữ liệu và hàm', isDone: true),
-  Task('Dựng layout màn hình Home', 'Thực hành Row, Column và Expanded'),
-  Task('Hoàn thành bài tập Flutter', 'Kiểm tra giao diện trên điện thoại'),
-  Task(
-    'Đọc tài liệu về Widget',
-    'Tìm hiểu Scaffold và BuildContext',
-    isDone: true,
-  ),
-  Task('Chuẩn bị bài học tiếp theo', 'Widget, Form và quản lý trạng thái'),
-];
-
 class TaskScreen extends StatefulWidget {
-  const TaskScreen({super.key, required this.onPendingChanged});
+  const TaskScreen({super.key, required this.onPendingChanged, this.api});
   final ValueChanged<int> onPendingChanged;
+  final SonaTaskApi? api;
 
   @override
   State<TaskScreen> createState() => _TaskScreenState();
 }
 
 class _TaskScreenState extends State<TaskScreen> {
-  final List<Task> _tasks = createSampleTasks();
+  late final http.Client _client = http.Client();
+  SonaTaskApi get _api => widget.api ?? _defaultApi;
+  late final _defaultApi = SonaTaskApi(_client, _apiBaseUrl);
+  static final _apiBaseUrl = const bool.hasEnvironment('SONATASK_API_URL')
+      ? const String.fromEnvironment('SONATASK_API_URL')
+      : !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+      ? 'http://10.0.2.2:5279'
+      : 'http://localhost:5279';
+
+  final List<SonaTask> _tasks = [];
+  final Set<int> _doneIds = {};
+  final Map<int, String> _priorities = {};
   bool _onlyPending = false;
+  bool _loading = true;
+  bool _loadFailed = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTasks();
+  }
+
+  @override
+  void dispose() {
+    if (widget.api == null) _client.close();
+    super.dispose();
+  }
 
   void _notifyPendingCount() {
-    widget.onPendingChanged(_tasks.where((task) => !task.isDone).length);
+    widget.onPendingChanged(
+      _tasks.where((task) => !_doneIds.contains(task.id)).length,
+    );
   }
 
-  void _addTask(String title, String description, String priority) {
+  Future<void> _loadTasks() async {
     setState(() {
-      _tasks.add(Task(title, description, priority: priority));
+      _loading = true;
+      _loadFailed = false;
     });
-    _notifyPendingCount();
+    try {
+      final tasks = await _api.getAll();
+      if (!mounted) return;
+      setState(() {
+        _tasks
+          ..clear()
+          ..addAll(tasks);
+        _loading = false;
+      });
+      _notifyPendingCount();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadFailed = true;
+        _loading = false;
+      });
+    }
   }
 
-  void _toggleTask(Task task, bool? value) {
+  Future<void> _addTask(
+    String title,
+    String description,
+    String priority,
+  ) async {
+    setState(() => _saving = true);
+    try {
+      final task = await _api.create(title, description);
+      if (!mounted) return;
+      setState(() {
+        _tasks.add(task);
+        _priorities[task.id] = priority;
+      });
+      _notifyPendingCount();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _toggleTask(SonaTask task, bool? value) {
     setState(() {
-      task.isDone = value ?? false;
+      if (value == true) {
+        _doneIds.add(task.id);
+      } else {
+        _doneIds.remove(task.id);
+      }
     });
     _notifyPendingCount();
   }
 
   @override
   Widget build(BuildContext context) {
-    final done = _tasks.where((task) => task.isDone).length;
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loadFailed) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Không tải được công việc từ API.'),
+            TextButton(onPressed: _loadTasks, child: const Text('Thử lại')),
+          ],
+        ),
+      );
+    }
+    final done = _tasks.where((task) => _doneIds.contains(task.id)).length;
     final visibleTasks = _onlyPending
-        ? _tasks.where((task) => !task.isDone).toList()
+        ? _tasks.where((task) => !_doneIds.contains(task.id)).toList()
         : _tasks;
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -74,6 +132,11 @@ class _TaskScreenState extends State<TaskScreen> {
         ),
         const SizedBox(height: 12),
         AddTaskForm(onAdd: _addTask),
+        TextButton.icon(
+          onPressed: _saving ? null : _loadTasks,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Tải lại danh sách'),
+        ),
         const SizedBox(height: 24),
         // Giữ StatCard và cách bố trí responsive đã học ở Bài 02.
         LayoutBuilder(
@@ -141,14 +204,14 @@ class _TaskScreenState extends State<TaskScreen> {
           const Text('Không có công việc phù hợp với bộ lọc.'),
         for (final task in visibleTasks)
           TaskCard(
-            key: ObjectKey(task),
+            key: ValueKey(task.id),
             task: task,
+            isDone: _doneIds.contains(task.id),
+            priority: _priorities[task.id] ?? 'Bình thường',
             onChanged: (value) => _toggleTask(task, value),
           ),
         const SizedBox(height: 16),
-        const Text(
-          'Dữ liệu lưu trong RAM. Khởi động lại sẽ trở về 5 công việc mẫu.',
-        ),
+        const Text('Trạng thái và ưu tiên chỉ lưu trong phiên hiện tại.'),
       ],
     );
   }
@@ -199,15 +262,21 @@ class StatCard extends StatelessWidget {
 }
 
 class TaskCard extends StatelessWidget {
-  const TaskCard({super.key, required this.task, required this.onChanged});
-  final Task task;
+  const TaskCard({
+    super.key,
+    required this.task,
+    required this.isDone,
+    required this.priority,
+    required this.onChanged,
+  });
+  final SonaTask task;
+  final bool isDone;
+  final String priority;
   final ValueChanged<bool?> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final color = task.isDone
-        ? const Color(0xFF16815D)
-        : const Color(0xFF315ACB);
+    final color = isDone ? const Color(0xFF16815D) : const Color(0xFF315ACB);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -227,7 +296,7 @@ class TaskCard extends StatelessWidget {
                   ),
                   child: Icon(Icons.description_outlined, color: color),
                 ),
-                if (task.isDone)
+                if (isDone)
                   const Positioned(
                     right: 0,
                     bottom: 0,
@@ -245,28 +314,26 @@ class TaskCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    task.title,
+                    task.name,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      decoration: task.isDone
-                          ? TextDecoration.lineThrough
-                          : null,
+                      decoration: isDone ? TextDecoration.lineThrough : null,
                     ),
                   ),
                   const SizedBox(height: 4),
                   if (task.description.isNotEmpty) Text(task.description),
-                  Text('Ưu tiên: ${task.priority}'),
+                  Text('Ưu tiên: $priority'),
                   const SizedBox(height: 8),
                   Text(
-                    task.isDone ? 'Đã xong' : 'Chưa xong',
+                    isDone ? 'Đã xong' : 'Chưa xong',
                     style: TextStyle(color: color, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
             ),
             Checkbox(
-              value: task.isDone,
+              value: isDone,
               onChanged: onChanged,
-              semanticLabel: 'Hoàn thành ${task.title}',
+              semanticLabel: 'Hoàn thành ${task.name}',
             ),
           ],
         ),
