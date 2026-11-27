@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/account_api.dart';
 import '../services/sona_task_api.dart';
 import 'about_screen.dart';
 import 'home_screen.dart';
@@ -7,8 +8,15 @@ import 'task_screen.dart';
 
 // Chỉ khung chung có Scaffold, AppBar và BottomNavigationBar.
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, this.api});
+  const AppShell({
+    super.key,
+    this.api,
+    required this.session,
+    required this.onSignOut,
+  });
   final SonaTaskApi? api;
+  final AccountSession session;
+  final VoidCallback onSignOut;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -42,15 +50,17 @@ class _AppShellState extends State<AppShell> {
       );
   }
 
-  void _showProfile() {
-    showDialog<void>(
+  Future<void> _showProfile() async {
+    final signOut = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Tài khoản'),
-        content: const Text(
-          'Sinh viên SonaTasks\nMôn Lập trình Mobile với Flutter',
-        ),
+        content: Text(widget.session.email),
         actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Đăng xuất'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Đóng'),
@@ -58,6 +68,7 @@ class _AppShellState extends State<AppShell> {
         ],
       ),
     );
+    if (mounted && signOut == true) widget.onSignOut();
   }
 
   @override

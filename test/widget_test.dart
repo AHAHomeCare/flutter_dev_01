@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:sonatasks_bai09_02/services/account_api.dart';
 import 'package:sonatasks_bai09_02/services/sona_task_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,7 +53,7 @@ int pending(WidgetTester tester) {
   return int.parse((badge.label! as Text).data!);
 }
 
-SonaTasksApp testApp() {
+SonaTasksApp testApp({AccountApi? accountApi}) {
   final tasks = List.generate(
     5,
     (index) => {
@@ -105,12 +106,44 @@ SonaTasksApp testApp() {
     return ok(task);
   });
   addTearDown(client.close);
-  return SonaTasksApp(api: SonaTaskApi(client, 'http://localhost:5279'));
+  final loginClient = MockClient(
+    (_) async => http.Response(
+      jsonEncode({
+        'result': {'status': 200},
+        'data': {
+          'tokenType': 'Bearer',
+          'accessToken': 'test',
+          'expiresIn': 3600,
+        },
+      }),
+      200,
+    ),
+  );
+  addTearDown(loginClient.close);
+  return SonaTasksApp(
+    api: SonaTaskApi(client, 'http://localhost:5279'),
+    accountApi: accountApi ?? AccountApi(loginClient, 'https://example.com'),
+  );
+}
+
+Future<void> enterCredentials(WidgetTester tester) async {
+  await tester.enterText(
+    find.byType(TextFormField).first,
+    'student@example.com',
+  );
+  await tester.enterText(find.byType(TextFormField).last, 'example123');
+}
+
+Future<void> openSignedInApp(WidgetTester tester) async {
+  await tester.pumpWidget(testApp());
+  await enterCredentials(tester);
+  await tester.tap(find.widgetWithText(FilledButton, 'Đăng nhập'));
+  await tester.pumpAndSettle();
 }
 
 void main() {
   testWidgets('Home có logo, lời chào và một khung cố định', (tester) async {
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('schoolLogo')), findsOneWidget);
     expect(
@@ -128,7 +161,7 @@ void main() {
   });
 
   testWidgets('Menu chọn đúng ba Screen và About đủ nội dung', (tester) async {
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     for (final entry in ['Task', 'About', 'Home'].asMap().entries) {
       await selectTab(tester, entry.value);
       final expected = {'Home': 0, 'Task': 1, 'About': 2}[entry.value];
@@ -147,7 +180,7 @@ void main() {
   });
 
   testWidgets('Form Task chặn rỗng và khoảng trắng', (tester) async {
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     await selectTab(tester, 'Task');
     for (final title in ['', '   ']) {
       await save(tester, title);
@@ -161,7 +194,7 @@ void main() {
   testWidgets('Thêm hai Task, xóa form và giữ dữ liệu khi đổi tab', (
     tester,
   ) async {
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     await selectTab(tester, 'Task');
     await save(tester, '  Ôn tập Flutter  ', description: '  Làm bài 03  ');
     for (final key in ['taskTitle', 'taskDescription']) {
@@ -184,7 +217,7 @@ void main() {
   });
 
   testWidgets('Ưu tiên được lưu riêng và form được đặt lại', (tester) async {
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     await selectTab(tester, 'Task');
     await tester.tap(find.byType(DropdownButton<String>));
     await tester.pumpAndSettle();
@@ -202,7 +235,7 @@ void main() {
   });
 
   testWidgets('Checkbox đồng bộ thống kê, badge và bộ lọc', (tester) async {
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     await selectTab(tester, 'Task');
     final title = find.text('Dựng layout màn hình Home');
     await showItem(tester, title);
@@ -231,24 +264,72 @@ void main() {
     expect(pending(tester), 5);
   });
 
-  testWidgets('Chuông thông báo và Dialog tài khoản hoạt động', (tester) async {
-    await tester.pumpWidget(testApp());
+  testWidgets('Đăng ký, đăng nhập và đăng xuất từ mục tài khoản', (
+    tester,
+  ) async {
+    final calls = <String>[];
+    final client = MockClient((request) async {
+      expect(request.method, 'POST');
+      final body = jsonDecode(request.body);
+      expect(body, {'email': 'student@example.com', 'password': 'example123'});
+      calls.add(request.url.path);
+      final registered = request.url.path.endsWith('/Register');
+      final status = registered ? 201 : 200;
+      return http.Response(
+        jsonEncode({
+          'result': {'status': status},
+          'data': registered
+              ? {'id': 1, 'email': 'student@example.com'}
+              : {
+                  'tokenType': 'Bearer',
+                  'accessToken': 'test',
+                  'expiresIn': 3600,
+                },
+        }),
+        status,
+      );
+    });
+    addTearDown(client.close);
+    await tester.pumpWidget(
+      testApp(accountApi: AccountApi(client, 'https://example.com/api/v1')),
+    );
+    expect(find.byType(BottomNavigationBar), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Đăng nhập'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nhập email hợp lệ.'), findsOneWidget);
+    expect(calls, isEmpty);
+    await tester.tap(find.text('Chưa có tài khoản? Đăng ký'));
+    await tester.pumpAndSettle();
+    await enterCredentials(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Đăng ký'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Đăng ký thành công. Vui lòng đăng nhập.'),
+      findsOneWidget,
+    );
+    await tester.enterText(find.byType(TextFormField).last, 'example123');
+    await tester.tap(find.widgetWithText(FilledButton, 'Đăng nhập'));
+    await tester.pumpAndSettle();
+    expect(calls, ['/api/v1/Account/Register', '/api/v1/Account/Login']);
+    expect(find.byType(BottomNavigationBar), findsOneWidget);
     await tester.tap(find.byTooltip('Thông báo'));
     await tester.pumpAndSettle();
     expect(find.text('Bạn có 5 công việc chưa hoàn thành.'), findsOneWidget);
     await tester.tap(find.byTooltip('Tài khoản'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
-    await tester.tap(find.text('Đóng'));
+    expect(find.text('student@example.com'), findsOneWidget);
+    await tester.tap(find.text('Đăng xuất'));
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(BottomNavigationBar), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Đăng nhập'), findsOneWidget);
   });
 
   testWidgets('Màn hình nhỏ và bàn phím không gây tràn', (tester) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(testApp());
+    await openSignedInApp(tester);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await selectTab(tester, 'Task');
