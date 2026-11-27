@@ -6,6 +6,17 @@ import '../services/sona_task_api.dart';
 
 import '../widgets/add_task_form.dart';
 
+enum TaskFilter {
+  all('Tất cả', null),
+  pending('Chưa hoàn thành', false),
+  done('Đã hoàn thành', true);
+
+  const TaskFilter(this.label, this.isDone);
+
+  final String label;
+  final bool? isDone;
+}
+
 class TaskScreen extends StatefulWidget {
   const TaskScreen({super.key, required this.onPendingChanged, this.api});
   final ValueChanged<int> onPendingChanged;
@@ -22,13 +33,15 @@ class _TaskScreenState extends State<TaskScreen> {
   static final _apiBaseUrl = const bool.hasEnvironment('SONATASK_API_URL')
       ? const String.fromEnvironment('SONATASK_API_URL')
       : !kIsWeb && defaultTargetPlatform == TargetPlatform.android
-      ? 'http://10.0.2.2:5279'
+      ? 'https://sona.somee.com/api/v1'
       : 'http://localhost:5279';
 
-  final List<SonaTask> _tasks = [];
-  final Set<int> _doneIds = {};
+  List<SonaTask> _tasks = [];
+  List<SonaTask> _visibleTasks = [];
   final Map<int, String> _priorities = {};
-  bool _onlyPending = false;
+  final Set<int> _updatingIds = {};
+  TaskFilter _filter = TaskFilter.all;
+  int _loadVersion = 0;
   bool _loading = true;
   bool _loadFailed = false;
   bool _saving = false;
@@ -45,29 +58,29 @@ class _TaskScreenState extends State<TaskScreen> {
     super.dispose();
   }
 
-  void _notifyPendingCount() {
-    widget.onPendingChanged(
-      _tasks.where((task) => !_doneIds.contains(task.id)).length,
-    );
-  }
-
   Future<void> _loadTasks() async {
+    final version = ++_loadVersion;
+    final status = _filter.isDone;
     setState(() {
       _loading = true;
       _loadFailed = false;
     });
+
     try {
-      final tasks = await _api.getAll();
-      if (!mounted) return;
+      final all = _api.getAll();
+      final lists = await Future.wait([
+        all,
+        if (status != null) _api.getTaskByStatus(status),
+      ]);
+      if (!mounted || version != _loadVersion) return;
       setState(() {
-        _tasks
-          ..clear()
-          ..addAll(tasks);
+        _tasks = lists.first;
+        _visibleTasks = lists.last;
         _loading = false;
       });
-      _notifyPendingCount();
+      widget.onPendingChanged(_tasks.where((task) => !task.isDone).length);
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || version != _loadVersion) return;
       setState(() {
         _loadFailed = true;
         _loading = false;
@@ -82,47 +95,37 @@ class _TaskScreenState extends State<TaskScreen> {
   ) async {
     setState(() => _saving = true);
     try {
-      final task = await _api.create(title, description);
+      final task = await _api.createTask(title, description);
       if (!mounted) return;
-      setState(() {
-        _tasks.add(task);
-        _priorities[task.id] = priority;
-      });
-      _notifyPendingCount();
+      _priorities[task.id] = priority;
+      await _loadTasks();
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  void _toggleTask(SonaTask task, bool? value) {
-    setState(() {
-      if (value == true) {
-        _doneIds.add(task.id);
-      } else {
-        _doneIds.remove(task.id);
-      }
-    });
-    _notifyPendingCount();
+  Future<void> _toggleTask(SonaTask task, bool? value) async {
+    if (value == null || _updatingIds.contains(task.id)) return;
+    setState(() => _updatingIds.add(task.id));
+    try {
+      await _api.updateStatusTask(task.id, value);
+      if (!mounted) return;
+      await _loadTasks();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không cập nhật được trạng thái công việc.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(task.id));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_loadFailed) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Không tải được công việc từ API.'),
-            TextButton(onPressed: _loadTasks, child: const Text('Thử lại')),
-          ],
-        ),
-      );
-    }
-    final done = _tasks.where((task) => _doneIds.contains(task.id)).length;
-    final visibleTasks = _onlyPending
-        ? _tasks.where((task) => !_doneIds.contains(task.id)).toList()
-        : _tasks;
+    final done = _tasks.where((task) => task.isDone).length;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -190,28 +193,44 @@ class _TaskScreenState extends State<TaskScreen> {
         ),
         const SizedBox(height: 6),
         Text('${_tasks.length} công việc • $done đã hoàn thành'),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Chỉ hiện việc chưa hoàn thành'),
-          value: _onlyPending,
-          onChanged: (value) {
-            setState(() {
-              _onlyPending = value;
-            });
-          },
+
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final filter in TaskFilter.values)
+              ChoiceChip(
+                label: Text(filter.label),
+                selected: _filter == filter,
+                onSelected: (selected) {
+                  if (!selected || _filter == filter) return;
+                  setState(() => _filter = filter);
+                  _loadTasks();
+                },
+              ),
+          ],
         ),
-        if (visibleTasks.isEmpty)
-          const Text('Không có công việc phù hợp với bộ lọc.'),
-        for (final task in visibleTasks)
-          TaskCard(
-            key: ValueKey(task.id),
-            task: task,
-            isDone: _doneIds.contains(task.id),
-            priority: _priorities[task.id] ?? 'Bình thường',
-            onChanged: (value) => _toggleTask(task, value),
-          ),
+        if (_loading)
+          const LinearProgressIndicator()
+        else if (_loadFailed) ...[
+          const Text('Không tải được công việc từ API.'),
+          TextButton(onPressed: _loadTasks, child: const Text('Thử lại')),
+        ] else if (_visibleTasks.isEmpty)
+          const Text('Không có công việc phù hợp với bộ lọc.')
+        else
+          for (final task in _visibleTasks)
+            TaskCard(
+              key: ValueKey(task.id),
+              task: task,
+              isDone: task.isDone,
+              priority: _priorities[task.id] ?? 'Bình thường',
+              onChanged: _updatingIds.contains(task.id)
+                  ? null
+                  : (value) => _toggleTask(task, value),
+            ),
         const SizedBox(height: 16),
-        const Text('Trạng thái và ưu tiên chỉ lưu trong phiên hiện tại.'),
+        const Text(
+          'Trạng thái được lưu trên máy chủ. Ưu tiên chỉ lưu trong phiên hiện tại.',
+        ),
       ],
     );
   }
@@ -272,7 +291,7 @@ class TaskCard extends StatelessWidget {
   final SonaTask task;
   final bool isDone;
   final String priority;
-  final ValueChanged<bool?> onChanged;
+  final ValueChanged<bool?>? onChanged;
 
   @override
   Widget build(BuildContext context) {

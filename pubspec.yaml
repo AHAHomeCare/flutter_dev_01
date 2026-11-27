@@ -1,5 +1,5 @@
-name: sonatasks_bai09
-description: "SonaTasks Bai 09 - Goi REST API."
+name: sonatasks_bai09_02
+description: "SonaTasks Bai 09.02 - Trang thai cong viec qua REST API."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

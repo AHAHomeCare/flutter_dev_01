@@ -2,11 +2,11 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:sonatasks_bai09/services/sona_task_api.dart';
+import 'package:sonatasks_bai09_02/services/sona_task_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sonatasks_bai09/main.dart';
-import 'package:sonatasks_bai09/screens/task_screen.dart';
+import 'package:sonatasks_bai09_02/main.dart';
+import 'package:sonatasks_bai09_02/screens/task_screen.dart';
 
 Future<void> selectTab(WidgetTester tester, String name) async {
   await tester.tap(
@@ -61,25 +61,48 @@ SonaTasksApp testApp() {
           ? 'Dựng layout màn hình Home'
           : 'Công việc ${index + 1}',
       'description': null,
+      'status': 0,
     },
   );
+  http.Response ok(Object data) => http.Response.bytes(
+    utf8.encode(
+      jsonEncode({
+        'result': {'status': 200},
+        'data': data,
+      }),
+    ),
+    200,
+  );
   final client = MockClient((request) async {
-    if (request.method == 'GET' && request.url.path == '/SonaTask/GetAll') {
-      return http.Response.bytes(
-        utf8.encode(jsonEncode({'status': 200, 'data': tasks})),
-        200,
+    if (request.method == 'GET') {
+      if (request.url.path == '/SonaTask/GetAll') return ok(tasks);
+      expect(request.url.path, '/SonaTask/GetTaskByStatus');
+      final status = request.url.queryParameters['status'];
+      expect(status, anyOf('0', '1'));
+      return ok(
+        tasks.where((task) => task['status'] == int.parse(status!)).toList(),
       );
     }
-    expect(request.method, 'POST');
-    expect(request.url.path, '/SonaTask/Create');
     final body =
         jsonDecode(utf8.decode(request.bodyBytes)) as Map<String, dynamic>;
-    final task = <String, dynamic>{'id': tasks.length + 1, ...body};
+    if (request.url.path.startsWith('/SonaTask/UpdateStatusTask/')) {
+      expect(request.method, 'POST');
+      final id = int.parse(request.url.pathSegments.last);
+      final task = tasks.singleWhere((task) => task['id'] == id);
+      expect(body, {'status': task['status'] == 0 ? 1 : 0});
+      task['status'] = body['status'] as int;
+      return ok(task);
+    }
+    expect(request.method, 'POST');
+    expect(request.url.path, '/SonaTask/CreateTask');
+    expect(body.keys, unorderedEquals(['name', 'description']));
+    final task = <String, dynamic>{
+      'id': tasks.length + 1,
+      ...body,
+      'status': 0,
+    };
     tasks.add(task);
-    return http.Response.bytes(
-      utf8.encode(jsonEncode({'status': 200, 'data': task})),
-      200,
-    );
+    return ok(task);
   });
   addTearDown(client.close);
   return SonaTasksApp(api: SonaTaskApi(client, 'http://localhost:5279'));
@@ -194,11 +217,11 @@ void main() {
       TextDecoration.lineThrough,
     );
     await showItem(tester, find.text('5 công việc • 1 đã hoàn thành'));
-    await showItem(tester, find.byType(SwitchListTile));
-    await tester.tap(find.byType(SwitchListTile));
+    await showItem(tester, find.text('Chưa hoàn thành'));
+    await tester.tap(find.text('Chưa hoàn thành'));
     await tester.pumpAndSettle();
     expect(title, findsNothing);
-    await tester.tap(find.byType(SwitchListTile));
+    await tester.tap(find.text('Đã hoàn thành'));
     await tester.pumpAndSettle();
     await showItem(tester, title);
     await tester.tap(
